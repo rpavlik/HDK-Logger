@@ -27,29 +27,53 @@
 #define INCLUDED_HandleError_h_GUID_9CF6A1DF_E762_4DB1_4845_533BC418C481
 
 // Internal Includes
-// - none
+#include "Config.h"
 
 // Library/third-party includes
 #include <hidapi.h>
 
 // Standard includes
 #include <cassert>
-#include <stdio.h>
-#include <stdexcept>
 #include <cstddef>
+#include <stdexcept>
+
+#ifdef HIDAPIPP_USE_FPRINTF
+#include <stdio.h>
+#endif
 
 namespace hidapi {
 namespace detail {
-    inline void handle_error(hid_device &dev) {
+    inline const wchar_t *handle_error(hid_device &dev) {
         const wchar_t *errMsg = hid_error(&dev);
         if (nullptr == errMsg) {
             assert(0 && "in hidapi::detail::handle_error but no error? should "
                         "not happen.");
-            return;
+            return errMsg;
         }
-        fprintf(stderr, "hidapi error: %ls\n", errMsg);
-        throw std::runtime_error("hidapi error");
+        return errMsg;
     }
+
+    inline void handle_error_throwing(const wchar_t *errMsg) {
+        if (errMsg) {
+#ifdef HIDAPIPP_USE_FPRINTF
+            fprintf(stderr, "hidapi error: %ls\n", errMsg);
+#endif
+            throw std::runtime_error("hidapi error");
+        } else {
+#ifdef HIDAPIPP_USE_FPRINTF
+            fprintf(
+                stderr,
+                "hidapi error, but could not retrieve HIDAPI error message\n");
+#endif
+            throw std::runtime_error("hidapi error, but could not retrieve "
+                                     "HIDAPI error message - should not "
+                                     "happen");
+        }
+    }
+    inline void handle_error_throwing(hid_device &dev) {
+        handle_error_throwing(handle_error(dev));
+    }
+
 } // namespace detail
 } // namespace hidapi
 #endif // INCLUDED_HandleError_h_GUID_9CF6A1DF_E762_4DB1_4845_533BC418C481

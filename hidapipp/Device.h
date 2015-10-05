@@ -57,6 +57,29 @@ namespace detail {
 using DataByte = unsigned char;
 using DataVector = std::vector<DataByte>;
 
+/// @name Non-throwing data types and methods
+/// @brief Use to interrogate the results of non-throwing calls.
+/// @{
+using DataResult = std::pair<DataVector, const wchar_t *>;
+
+inline bool had_error(DataResult const &result) {
+    return nullptr != result.second;
+}
+inline const wchar_t *get_error(DataResult const &result) {
+    return result.second;
+}
+
+inline DataVector const &get_data(DataResult const &result) {
+    return result.first;
+}
+
+inline DataVector &get_data(DataResult &result) { return result.first; }
+
+inline DataVector &&get_data(DataResult &&result) {
+    return std::move(result.first);
+}
+/// @}
+
 static const std::size_t DEFAULT_MAX_LENGTH = 512;
 
 /// CRTP base class for device objects: provides common functionality for
@@ -70,15 +93,24 @@ template <typename Derived> class DeviceBase {
     /// wrapped.
     hid_device *get() const { return get_(); }
 
+    /// @name Non-throwing methods
+    /// @brief In case of error, these methods simply return an empty buffer
+    /// with the error as the second return value (second member in the
+    /// pair/tuple). Free functions above can interrogate that result.
+    /// @{
+
     /// Reads a HID report, if available.
     ///
     /// If the device has more than one report type, the first byte will be the
     /// report type.
-    DataVector read(std::size_t maxLength = DEFAULT_MAX_LENGTH) {
-        auto ret = DataVector(maxLength);
-        auto result = hid_read(get(), ret.data(), maxLength);
-        handle_buffer_and_error(ret, result);
-        return ret;
+    ///
+    /// An empty result means nothing available. Errors will cause the second
+    /// value returned (the wchar_t pointer) to be non-null and refer to an
+    /// error message.
+    DataResult read(std::size_t maxLength = DEFAULT_MAX_LENGTH) {
+        auto data = DataVector(maxLength);
+        auto result = hid_read(get(), data.data(), maxLength);
+        return handle_buffer(std::move(data), result);
     }
 
     /// Gets a HID feature report.
@@ -87,21 +119,71 @@ template <typename Derived> class DeviceBase {
     /// vector.
     DataVector get_feature_report(unsigned char reportId,
                                   std::size_t maxLength = DEFAULT_MAX_LENGTH) {
-        auto ret = DataVector(maxLength + 1);
-        ret[0] = reportId;
-        auto result = hid_getFeatureReport(get(), ret.data(), maxLength);
-        handle_buffer_and_error(ret, result);
-        return ret;
+        auto data = DataVector(maxLength + 1);
+        data[0] = reportId;
+        auto result = hid_getFeatureReport(get(), data.data(), maxLength);
+        return handle_buffer(std::move(data), result);
     }
+
+    /// @}
+
+    /// @name Throwing methods
+    /// @brief In case of error, these methods throw an error. In case of no
+    /// error (and nothing to read is considered no error) they return only the
+    /// buffer.
+    /// @{
+
+    /// Reads a HID report, if available.
+    ///
+    /// @sa DeviceBase::read()
+    DataResult read_throwing(std::size_t maxLength = DEFAULT_MAX_LENGTH) {
+        auto data = DataVector(maxLength);
+        auto result = hid_read(get(), data.data(), maxLength);
+        return handle_buffer_and_throw(std::move(data), result);
+    }
+    /// Gets a HID feature report.
+    ///
+    /// @sa DeviceBase::get_feature_report()
+    DataVector
+    get_feature_report_throwing(unsigned char reportId,
+                                std::size_t maxLength = DEFAULT_MAX_LENGTH) {
+        auto data = DataVector(maxLength + 1);
+        data[0] = reportId;
+        auto result = hid_getFeatureReport(get(), data.data(), maxLength);
+        return handle_buffer_and_throw(std::move(data), result);
+    }
+    /// @}
+
     using derived_type = Derived;
 
   private:
-    void handle_buffer_and_error(DataVector &ret, int callResult) {
+    const wchar_t *handle_buffer_base(DataVector &data, int callResult) {
+        const wchar_t *ret = nullptr;
         if (callResult < 0) {
-            detail::handle_error(*get());
+            ret = detail::handle_error(*get());
+        } else {
+            data.resize(callResult);
         }
-        ret.resize(callResult);
+        return ret;
     }
+
+    DataResult handle_buffer(DataVector &&data, int callResult) {
+        const wchar_t *ret = handle_buffer_base(data, callResult);
+        if (callResult < 0) {
+            data.clear();
+        }
+        return std::make_pair(std::move(data), ret);
+    }
+
+    DataVector handle_buffer_and_throw(DataVector &&data, int callResult) {
+        auto errMsg = handle_buffer_base(data, callResult);
+        if (callResult < 0) {
+            detail::handle_error_throwing(errMsg);
+        }
+        return std::move(data);
+    }
+
+    /// Function used by CTRP to get HIDAPI opaque pointer from derived class.
     hid_device *get_() const {
         return static_cast<derived_type const *>(this)->get();
     }
