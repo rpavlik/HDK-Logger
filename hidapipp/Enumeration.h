@@ -41,10 +41,18 @@ namespace detail {
     /// usage
     class EnumerationIterator {
       public:
+        /// Default constructor, aka end iterator.
         EnumerationIterator() {}
-        EnumerationIterator(hid_device_info *dev) : dev_(dev) {}
+        /// Cosntructor from an enumerator entry (device info pointer)
+        explicit EnumerationIterator(hid_device_info *dev) : dev_(dev) {}
+
+        /// Check validity
         explicit operator bool() const { return dev_; }
+
+        /// Dereference to get a device info pointer.
         hid_device_info *operator*() const { return dev_; }
+
+        /// Pre-increment.
         EnumerationIterator &operator++() {
             dev_ = dev_->next;
             return *this;
