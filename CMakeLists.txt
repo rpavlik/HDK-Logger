@@ -22,6 +22,8 @@ if(NOT TARGET hidapi)
     message(FATAL_ERROR "This app doesn't do anything without HIDAPI - fix the errors above!")
 endif()
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 add_executable(hdk-logger HDK-Logger.cpp)
 target_link_libraries(hdk-logger PRIVATE hidapi)
 set_property(TARGET hdk-logger PROPERTY CXX_STANDARD 11)
