@@ -60,10 +60,32 @@ int main() {
         return -1;
     }
 
+    std::cout << "Opening " << hdk_path << std::endl;
+
+    /// Open the device
     auto dev = hidapi::UniqueDevice{hdk_path};
 
-    // Enable blocking mode.
+    /// Enable blocking mode on this device
     hid_set_nonblocking(dev.get(), 0);
+
+    using clock = std::chrono::system_clock;
+    // Set end time for the loop shortly into the future.
+    auto endTime = clock::now() + std::chrono::milliseconds(500);
+    while (clock::now() < endTime) {
+        /// Read some data using the non-throwing interface
+        auto result = dev.read();
+        /// Handle error
+        if (hidapi::had_error(result)) {
+            fprintf(stderr, "HIDAPI had an error reading from the HDK: %ls\n",
+                    hidapi::get_error(result));
+            return -1;
+        }
+        /// Get the actual data and do something with it.
+        auto const &data = hidapi::get_data(result);
+        std::cout << "Report size: " << data.size()
+                  << " Version number: " << int(data[0])
+                  << " Sequence number: " << int(data[1]) << "\n";
+    }
 
     return 0;
 }
