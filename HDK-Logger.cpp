@@ -37,6 +37,7 @@
 #include <vector>
 
 namespace hidapi {
+/// RAII initialization/shutdown of the HIDAPI library.
 class Library {
   public:
     Library() {
@@ -50,6 +51,8 @@ class Library {
 };
 
 namespace detail {
+    /// Internal type of a device in an enumeration process, for easy range-for
+    /// usage
     class EnumerationIterator {
       public:
         EnumerationIterator() {}
@@ -64,21 +67,28 @@ namespace detail {
       private:
         struct hid_device_info *dev_ = nullptr;
     };
+
+    /// Equality of enumeration iterator
     inline bool operator==(EnumerationIterator const &lhs,
                            EnumerationIterator const &rhs) {
         return *lhs == *rhs;
     }
 
+    /// Inequality of enumeration iterator
     inline bool operator!=(EnumerationIterator const &lhs,
                            EnumerationIterator const &rhs) {
         return *lhs != *rhs;
     }
+
+    /// Deleter functor for a HIDAPI enumeration
     class EnumerationDeleter {
       public:
         void operator()(struct hid_device_info *devs) {
             hid_free_enumeration(devs);
         }
     };
+
+    /// Deleter functor for a HIDAPI device
     class DeviceDeleter {
       public:
         void operator()(hid_device *dev) {
@@ -87,6 +97,7 @@ namespace detail {
             }
         }
     };
+
     inline void handle_error(hid_device &dev) {
         const wchar_t *errMsg = hid_error(&dev);
         if (nullptr == errMsg) {
@@ -102,10 +113,17 @@ namespace detail {
     using DeviceSharedPtr = std::shared_ptr<hid_device>;
 } // namespace detail
 
+/// HIDAPI enumeration object for safe enumeration. Ideal for usage in a
+/// range-for loop. Note that once this object is destroyed, all data referred
+/// to by the iterators goes away, so if you (for instance) want to keep a
+/// device path around, make a copy of it.
 class Enumeration {
   public:
+    /// Constructor - default arguments do not filter on VID/PID, but optionally
+    /// can.
     Enumeration(unsigned short vid = 0x0000, unsigned short pid = 0x0000)
         : devs_(hid_enumerate(vid, pid)) {}
+
     detail::EnumerationIterator begin() const {
         return detail::EnumerationIterator(devs_.get());
     }
@@ -119,20 +137,36 @@ class Enumeration {
 
 using DataByte = unsigned char;
 using DataVector = std::vector<DataByte>;
-/// CRTP base class for device objects
+
+static const size_t DEFAULT_MAX_LENGTH = 512;
+/// CRTP base class for device objects: provides common functionality for
+/// C++-wrapped HIDAPI devices.
 template <typename Derived> class DeviceBase {
   public:
+    /// Checks for validity of the object.
     explicit operator bool() const { return (nullptr != get_()); }
+
+    /// Accessor for the raw HIDAPI opaque object, for functions that aren't
+    /// wrapped.
     hid_device *get() const { return get_(); }
 
-    DataVector read(size_t maxLength) {
+    /// Reads a HID report, if available.
+    ///
+    /// If the device has more than one report type, the first byte will be the
+    /// report type.
+    DataVector read(size_t maxLength = DEFAULT_MAX_LENGTH) {
         auto ret = DataVector(maxLength);
         auto result = hid_read(get(), ret.data(), maxLength);
         handle_buffer_and_error(ret, result);
         return ret;
     }
 
-    DataVector get_feature_report(unsigned char reportId, size_t maxLength) {
+    /// Gets a HID feature report.
+    ///
+    /// The supplied report ID will be the first byte of the returned data
+    /// vector.
+    DataVector get_feature_report(unsigned char reportId,
+                                  size_t maxLength = DEFAULT_MAX_LENGTH) {
         auto ret = DataVector(maxLength + 1);
         ret[0] = reportId;
         auto result = hid_getFeatureReport(get(), ret.data(), maxLength);
@@ -155,16 +189,25 @@ template <typename Derived> class DeviceBase {
 
 /// A wrapper class for a HID device with ownership semantics equal to those of
 /// std::unique_ptr
+///
+/// Most functionality provided by hidapi::DeviceBase
 class UniqueDevice : public DeviceBase<UniqueDevice> {
   public:
     using base = DeviceBase<UniqueDevice>;
+    /// Default, empty constructor. Not very useful.
     UniqueDevice() : base() {}
+    /// Constructor opening the first device with the given VID and PID and
+    /// optionally matching the serial number. Wraps `hid_open()`
     UniqueDevice(unsigned short vid, unsigned short pid,
                  const wchar_t *serial_number = nullptr)
         : base(), dev_(hid_open(vid, pid, serial_number)) {}
+    /// Constructor from platform-specific device path, often found through
+    /// enumeration.  Wraps `hid_open_path()`
     UniqueDevice(const char *path) : base(), dev_(hid_open_path(path)) {}
+    /// @overload
     UniqueDevice(std::string const &path) : UniqueDevice(path.c_str()) {}
-
+    /// Accessor for the raw HIDAPI opaque object, for functions that aren't
+    /// wrapped.
     hid_device *get() const { return dev_.get(); }
 
   private:
@@ -176,15 +219,23 @@ class UniqueDevice : public DeviceBase<UniqueDevice> {
 class SharedDevice : public DeviceBase<SharedDevice> {
   public:
     using base = DeviceBase<SharedDevice>;
-    SharedDevice() {}
+    /// Default, empty constructor. Not very useful.
+    SharedDevice() : base() {}
+    /// Constructor opening the first device with the given VID and PID and
+    /// optionally matching the serial number. Wraps `hid_open()`
     SharedDevice(unsigned short vid, unsigned short pid,
                  const wchar_t *serial_number = nullptr)
         : base(),
           dev_(hid_open(vid, pid, serial_number), detail::DeviceDeleter()) {}
+    /// Constructor from platform-specific device path, often found through
+    /// enumeration.  Wraps `hid_open_path()`
     SharedDevice(const char *path)
         : base(), dev_(hid_open_path(path), detail::DeviceDeleter()) {}
+    /// @overload
     SharedDevice(std::string const &path) : SharedDevice(path.c_str()) {}
 
+    /// Accessor for the raw HIDAPI opaque object, for functions that aren't
+    /// wrapped.
     hid_device *get() const { return dev_.get(); }
 
   private:
