@@ -47,7 +47,7 @@ namespace detail {
         explicit EnumerationIterator(hid_device_info *dev) : dev_(dev) {}
 
         /// Check validity
-        explicit operator bool() const { return dev_; }
+        explicit operator bool() const { return nullptr != dev_; }
 
         /// Dereference to get a device info pointer.
         hid_device_info *operator*() const { return dev_; }
